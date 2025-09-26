@@ -3719,11 +3719,11 @@ extern int generic_fadvise(struct file *file, loff_t offset, loff_t len,
 			   int advice);
 
 #if defined(CONFIG_IO_URING)
-bool io_is_uring_fops(struct file *file);
+extern struct sock *io_uring_get_socket(struct file *file);
 #else
-static inline bool io_is_uring_fops(struct file *file)
+static inline struct sock *io_uring_get_socket(struct file *file)
 {
-	return false;
+	return NULL;
 }
 #endif
 
