@@ -1,0 +1,114 @@
+```yaml
+name: Build Kernel A52s 5G
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Setup ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ${{ runner.os }}-kernel-ccache
+          restore-keys: |
+            ${{ runner.os }}-kernel-ccache-
+
+      - name: Cache Toolchains
+        id: cache-toolchains
+        uses: actions/cache@v4
+        with:
+          path: toolchains
+          key: ${{ runner.os }}-clang-r530567-a52s
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            bc \
+            cpio \
+            curl \
+            wget \
+            git \
+            zip \
+            unzip \
+            zstd \
+            libssl-dev \
+            bison \
+            flex \
+            ccache \
+            python3 \
+            lld
+
+          ccache -M 10G
+
+      - name: Download Toolchain
+        if: steps.cache-toolchains.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p toolchains/clang
+
+          wget -qO clang.tar.gz \
+          "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r530567.tar.gz"
+
+          tar -xzf clang.tar.gz -C toolchains/clang
+
+      - name: Verify Toolchain
+        run: |
+          export PATH="$GITHUB_WORKSPACE/toolchains/clang/bin:$PATH"
+          clang --version
+          ld.lld --version
+
+      - name: Build Kernel
+        run: |
+          export PATH="$GITHUB_WORKSPACE/toolchains/clang/bin:$PATH"
+
+          mkdir -p out
+
+          make O=$(pwd)/out ARCH=arm64 vendor/a52sxq_kor_single_defconfig
+
+          # Auto-answer Kconfig prompts to prevent CI hangs
+          yes "" | make O=$(pwd)/out ARCH=arm64 olddefconfig
+
+          make -j$(nproc) \
+            O=$(pwd)/out \
+            ARCH=arm64 \
+            CC=clang \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CROSS_COMPILE=aarch64-none-linux-gnu- \
+            KBUILD_BUILD_USER=github \
+            KBUILD_BUILD_HOST=actions \
+            CONFIG_SECTION_MISMATCH_WARN_ONLY=y
+
+      - name: Prepare Modules
+        run: |
+          export PATH="$GITHUB_WORKSPACE/toolchains/clang/bin:$PATH"
+
+          mkdir -p out/modules_for_zip
+
+          find out -type f -name "*.ko" \
+            -exec cp {} out/modules_for_zip/ \;
+
+          find out/modules_for_zip \
+            -type f -name "*.ko" \
+            -exec llvm-strip --strip-unneeded {} \;
+
+      - name: Upload Kernel Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kernel-Artifacts
+          path: |
+            out/arch/arm64/boot/Image
+            out/arch/arm64/boot/dtbo.img
+            out/arch/arm64/boot/dts/vendor/qcom/yupik.dtb
+            out/modules_for_zip/
