@@ -29,7 +29,7 @@ jobs:
           path: toolchains
           key: ${{ runner.os }}-clang-r530567-a52s
 
-      - name: Install dependencies
+      - name: Install deps
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -47,12 +47,12 @@ jobs:
           sudo cp mkbootimg /usr/local/bin/
           sudo chmod +x /usr/local/bin/mkbootimg
 
-      - name: Download magiskboot (from your repository)
+      - name: Download magiskboot
         run: |
-          sudo wget -O /usr/local/bin/magiskboot "https://github.com/danjekb/magiskbinary/releases/download/magiskboot-24.3/magiskboot-x86_64"
-          sudo chmod +x /usr/local/bin/magiskboot
+           sudo wget -O /usr/local/bin/magiskboot "https://github.com/danjekb/magiskbinary/releases/download/magiskboot-24.3/magiskboot-x86_64"
+           sudo chmod +x /usr/local/bin/magiskboot
 
-      - name: Download base images from RisenID
+      - name: Get stock images from RisenID
         run: |
           wget -O stock_kernel.tar "https://github.com/RisenID/proprietary_vendor_samsung_a52sxq/releases/download/A528BXXUAGXK8_BTU/A528BXXUAGXK8_kernel.tar"
           tar -xvf stock_kernel.tar
@@ -63,6 +63,13 @@ jobs:
           cp boot.img template-zip-file/images/
           cp vendor_boot.img template-zip-file/images/
           cp dtbo.img template-zip-file/images/
+
+      - name: Download avbtool and erase footer
+        run: |
+          wget -q https://raw.githubusercontent.com/jbeich/platform_external_avb/refs/heads/master/avbtool.py
+          chmod +x avbtool.py
+          python3 avbtool.py erase_footer --image template-zip-file/images/boot.img 2>/dev/null || true
+          python3 avbtool.py erase_footer --image template-zip-file/images/vendor_boot.img 2>/dev/null || true
 
       - name: Setup toolchain
         if: steps.cache-toolchains.outputs.cache-hit != 'true'
@@ -115,21 +122,15 @@ jobs:
           export PATH="$GITHUB_WORKSPACE/toolchains/clang/bin:$PATH"
           MODULES_DIR="out/modules_for_zip"
           KERNEL_VER="5.4.289"
-
           if [ ! -f "out/System.map" ]; then
             echo "Błąd: Brak out/System.map"
             exit 1
           fi
-
           mkdir -p tmp/lib/modules/$KERNEL_VER
           cp $MODULES_DIR/*.ko tmp/lib/modules/$KERNEL_VER/
-
           sudo depmod -b tmp -F out/System.map $KERNEL_VER
-
           cp tmp/lib/modules/$KERNEL_VER/modules.* $MODULES_DIR/
-
           sed -i 's|/tmp/lib/modules/|/lib/modules/|g' $MODULES_DIR/modules.dep
-
           ls $MODULES_DIR/*.ko | xargs -n1 basename | sed 's/.ko$//' > $MODULES_DIR/modules.load
 
       - name: Patch boot.img
@@ -181,12 +182,10 @@ jobs:
       - name: Upload to GoFile
         run: |
           ZIP_FILE=$(ls CrappyKernel-*.zip | head -1)
-          echo "Uploading $ZIP_FILE to GoFile..."
           RESPONSE=$(curl -s -F "file=@$ZIP_FILE" "https://store1.gofile.io/contents/uploadfile")
           DOWNLOAD_URL=$(echo "$RESPONSE" | jq -r '.data.downloadPage')
           if [ "$DOWNLOAD_URL" != "null" ] && [ -n "$DOWNLOAD_URL" ]; then
-            echo "✅ Upload successful!"
-            echo "🔗 Download link: $DOWNLOAD_URL"
+            echo "✅ Upload successful! Link: $DOWNLOAD_URL"
           else
             echo "❌ Upload failed. Response: $RESPONSE"
             exit 1
