@@ -47,11 +47,9 @@ jobs:
           sudo cp mkbootimg /usr/local/bin/
           sudo chmod +x /usr/local/bin/mkbootimg
 
-      - name: Download magiskboot
+      - name: Download magiskboot (from your repository)
         run: |
-          wget https://github.com/topjohnwu/Magisk/releases/download/v30.7/Magisk-v30.7.apk -O magisk.zip
-          unzip -j magisk.zip lib/x86_64/libmagiskboot.so -d /tmp
-          sudo cp /tmp/libmagiskboot.so /usr/local/bin/magiskboot
+          sudo wget -O /usr/local/bin/magiskboot "https://github.com/danjekb/magiskbinary/releases/download/magiskboot-24.3/magiskboot-x86_64"
           sudo chmod +x /usr/local/bin/magiskboot
 
       - name: Download base images from RisenID
