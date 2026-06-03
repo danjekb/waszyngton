@@ -91,12 +91,36 @@ jobs:
             KBUILD_BUILD_USER=github \
             KBUILD_BUILD_HOST=actions
 
-      - name: Prepare modules
+      - name: Prepare modules (collect .ko)
         run: |
           export PATH="$GITHUB_WORKSPACE/toolchains/clang/bin:$PATH"
           mkdir -p out/modules_for_zip
           find out -type f -name "*.ko" -exec cp {} out/modules_for_zip/ \;
           find out/modules_for_zip -type f -name "*.ko" -exec llvm-strip --strip-unneeded {} \;
+
+      - name: Generate module metadata (modules.dep, modules.alias, modules.load)
+        run: |
+          export PATH="$GITHUB_WORKSPACE/toolchains/clang/bin:$PATH"
+          MODULES_DIR="out/modules_for_zip"
+          KERNEL_VER="5.4.289"
+
+          if [ ! -f "out/System.map" ]; then
+            echo "Błąd: Brak out/System.map – nie można wygenerować modules.dep"
+            exit 1
+          fi
+
+          mkdir -p tmp/lib/modules/$KERNEL_VER
+          cp $MODULES_DIR/*.ko tmp/lib/modules/$KERNEL_VER/
+
+          sudo depmod -b tmp -F out/System.map $KERNEL_VER
+
+          cp tmp/lib/modules/$KERNEL_VER/modules.* $MODULES_DIR/
+
+          sed -i 's|/tmp/lib/modules/|/lib/modules/|g' $MODULES_DIR/modules.dep
+
+          ls $MODULES_DIR/*.ko | xargs -n1 basename | sed 's/.ko$//' > $MODULES_DIR/modules.load
+
+          echo "Wygenerowano metadane modułów w $MODULES_DIR"
 
       - name: Create dtb.img
         run: |
@@ -140,9 +164,10 @@ jobs:
           cp ../out/arch/arm64/boot/dtbo.img .
           cp ../out/arch/arm64/boot/dtb.img .
           cp ../out/vendor_boot/vendor_boot.img .
-          mkdir -p modules/system/lib/modules
+          mkdir -p modules/lib/modules
           if [ -d ../out/modules_for_zip ]; then
-            cp ../out/modules_for_zip/*.ko modules/system/lib/modules/ 2>/dev/null || true
+            cp ../out/modules_for_zip/*.ko modules/lib/modules/ 2>/dev/null || true
+            cp ../out/modules_for_zip/modules.* modules/lib/modules/ 2>/dev/null || true
           fi
           printf '%s\n' \
             '## AnyKernel3 – Samsung A52s 5G (Android 14, KSU-Next)' \
