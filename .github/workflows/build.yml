@@ -35,8 +35,14 @@ jobs:
           sudo apt-get install -y \
             build-essential bc cpio curl wget git zip unzip zstd \
             libssl-dev bison flex ccache python3 lld device-tree-compiler \
-            android-sdk-libsparse-utils android-bootimg-tools
+            android-sdk-libsparse-utils python3-pip
           ccache -M 10G
+
+      - name: Download mkbootimg.py
+        run: |
+          wget https://raw.githubusercontent.com/aosp-mirror/platform_system_core/master/mkbootimg/mkbootimg.py
+          chmod +x mkbootimg.py
+          sudo mv mkbootimg.py /usr/local/bin/mkbootimg.py
 
       - name: Download Toolchain
         if: steps.cache-toolchains.outputs.cache-hit != 'true'
@@ -104,7 +110,7 @@ jobs:
             exit 1
           fi
           mkdir -p out/vendor_boot
-          mkbootimg \
+          python3 /usr/local/bin/mkbootimg.py \
             --kernel "$KERNEL_IMAGE" \
             --dtb "$DTB_FILE" \
             --base 0x00000000 \
@@ -158,7 +164,6 @@ jobs:
       - name: Upload raw artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Kernel-Artifacts-raw
           path: |
             out/arch/arm64/boot/Image
             out/arch/arm64/boot/dtbo.img
