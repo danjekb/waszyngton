@@ -42,6 +42,8 @@ jobs:
         run: |
           git clone https://github.com/osm0sis/mkbootimg.git /tmp/mkbootimg
           cd /tmp/mkbootimg
+          # Remove -Werror flags to avoid compilation errors
+          find . -name Makefile -exec sed -i 's/-Werror//g' {} \;
           make
           sudo cp mkbootimg /usr/local/bin/
           sudo chmod +x /usr/local/bin/mkbootimg
