@@ -35,8 +35,7 @@ jobs:
           sudo apt-get install -y \
             build-essential bc cpio curl wget git zip unzip zstd \
             libssl-dev bison flex ccache python3 lld device-tree-compiler \
-            android-sdk-libsparse-utils python3-pip
-          pip3 install --break-system-packages mkbootimg || pip3 install mkbootimg
+            android-sdk-libsparse-utils android-bootimg-tools
           ccache -M 10G
 
       - name: Download Toolchain
