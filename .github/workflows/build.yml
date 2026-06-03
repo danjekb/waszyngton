@@ -49,7 +49,9 @@ jobs:
 
       - name: Download magiskboot
         run: |
-          sudo wget -O /usr/local/bin/magiskboot "https://github.com/Uevo001/magiskboot-linux/raw/refs/heads/main/x86_64/magiskboot"
+          wget https://github.com/topjohnwu/Magisk/releases/download/v30.7/Magisk-v30.7.apk -O magisk.zip
+          unzip -j magisk.zip lib/x86_64/libmagiskboot.so -d /tmp
+          sudo cp /tmp/libmagiskboot.so /usr/local/bin/magiskboot
           sudo chmod +x /usr/local/bin/magiskboot
 
       - name: Download base images from RisenID
@@ -145,18 +147,14 @@ jobs:
         run: |
           cp template-zip-file/images/vendor_boot.img vendor_boot.img
           magiskboot unpack vendor_boot.img
-          # Replace dtb
           cp out/arch/arm64/boot/dts/vendor/qcom/yupik.dtb dtb
-          # Modify ramdisk
           if [ -d ramdisk ]; then
             rm -rf ramdisk
           fi
           mkdir ramdisk
           cd ramdisk
           cpio -idm < ../ramdisk.cpio
-          # Remove old modules
           rm -rf lib/modules/*
-          # Add new modules and metadata
           mkdir -p lib/modules/5.4.289
           cp ../../out/modules_for_zip/*.ko lib/modules/5.4.289/
           cp ../../out/modules_for_zip/modules.* lib/modules/5.4.289/
@@ -167,7 +165,6 @@ jobs:
           cd ..
           mv ramdisk.cpio.new ramdisk.cpio
           rm -rf ramdisk
-          # Repack vendor_boot
           magiskboot repack vendor_boot.img
           mv new-boot.img vendor_boot.img
           cp vendor_boot.img template-zip-file/images/vendor_boot.img
