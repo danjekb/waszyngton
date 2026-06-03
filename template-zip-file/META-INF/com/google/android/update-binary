@@ -1,7 +1,4 @@
 #!/sbin/sh
-# Shell Script EDIFY Replacement: Recovery Flashable Zip
-# Credits to: osm0sis, salvogiangri, utkustnr/Frax3r, Simon1511, RisenID, saadelasfur, MySelly
-# See https://github.com/bone-machine/android_kernel_samsung_sm7325_a52s_5g
 
 OUTFD=/proc/self/fd/$2;
 ZIPFILE="$3";
@@ -73,10 +70,9 @@ set_progress() { echo "set_progress $1" >> $OUTFD; }
 
 ui_print " ";
 ui_print "***************************************************";
-ui_print "* bone-machine's custom kernel for A52s 5G (AOSP) *";
+ui_print "* CrappyKernel's for A52s 5G        *";
 ui_print "* KernelSU-Next v3.2.0-legacy                     *";
-ui_print "* Credits: salvogiangri, Frax3r, Simon1511,       *";
-ui_print "* RisenID, saadelasfur, and MySelly               *";
+ui_print "* Credits: @SopelLodu                             *";
 ui_print "***************************************************";
 ui_print " ";
 
