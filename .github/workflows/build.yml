@@ -1,4 +1,4 @@
-name: Build Kernel
+name: Build Kernel A52s 5G (KSU-Next, Android 14)
 
 on:
   workflow_dispatch:
@@ -35,7 +35,7 @@ jobs:
           sudo apt-get install -y \
             build-essential bc cpio curl wget git zip unzip zstd \
             libssl-dev bison flex ccache python3 lld device-tree-compiler \
-            android-sdk-libsparse-utils jq
+            android-sdk-libsparse-utils jq lz4
           ccache -M 10G
 
       - name: Build mkbootimg from source
@@ -47,12 +47,23 @@ jobs:
           sudo cp mkbootimg /usr/local/bin/
           sudo chmod +x /usr/local/bin/mkbootimg
 
-      - name: Download magiskboot
+      - name: Download magiskboot (x86_64)
         run: |
-          wget https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk -O magisk.zip
-          unzip -j magisk.zip lib/armeabi-v7a/magiskboot -d /tmp
-          sudo cp /tmp/magiskboot /usr/local/bin/
+          sudo wget -O /usr/local/bin/magiskboot "https://github.com/Uevo001/magiskboot-linux/raw/refs/heads/main/x86_64/magiskboot"
           sudo chmod +x /usr/local/bin/magiskboot
+
+      - name: Download base images from RisenID
+        run: |
+          wget -O stock_kernel.tar "https://github.com/RisenID/proprietary_vendor_samsung_a52sxq/releases/download/A528BXXUAGXK8_BTU/A528BXXUAGXK8_kernel.tar"
+          tar -xvf stock_kernel.tar
+          lz4 -d boot.img.lz4 boot.img
+          lz4 -d vendor_boot.img.lz4 vendor_boot.img
+          lz4 -d dtbo.img.lz4 dtbo.img
+          # Skopiuj do katalogu images (nadpisze stare, jeśli istnieją)
+          mkdir -p template-zip-file/images
+          cp boot.img template-zip-file/images/
+          cp vendor_boot.img template-zip-file/images/
+          cp dtbo.img template-zip-file/images/
 
       - name: Download Toolchain
         if: steps.cache-toolchains.outputs.cache-hit != 'true'
@@ -159,6 +170,7 @@ jobs:
           mkdir ramdisk
           cd ramdisk
           cpio -idm < ../ramdisk.cpio
+          # Usuń stare moduły (jeśli istnieją) – to kluczowe
           rm -rf lib/modules/*
           mkdir -p lib/modules/5.4.289
           cp ../../out/modules_for_zip/*.ko lib/modules/5.4.289/
@@ -174,9 +186,9 @@ jobs:
           mv new-boot.img vendor_boot.img
           cp vendor_boot.img template-zip-file/images/vendor_boot.img
 
-      - name: Copy dtbo.img to images folder
+      - name: Copy dtbo.img to images folder (already there, but ensure)
         run: |
-          cp out/arch/arm64/boot/dtbo.img template-zip-file/images/
+          cp out/arch/arm64/boot/dtbo.img template-zip-file/images/ 2>/dev/null || true
 
       - name: Remove example-modules directory
         run: |
