@@ -42,7 +42,6 @@ jobs:
         run: |
           git clone https://github.com/osm0sis/mkbootimg.git /tmp/mkbootimg
           cd /tmp/mkbootimg
-          # Remove -Werror flags to avoid compilation errors
           find . -name Makefile -exec sed -i 's/-Werror//g' {} \;
           make
           sudo cp mkbootimg /usr/local/bin/
@@ -102,8 +101,13 @@ jobs:
       - name: Create dtb.img
         run: |
           mkdir -p out/arch/arm64/boot
-          mkdtimg create out/arch/arm64/boot/dtb.img \
-            out/arch/arm64/boot/dts/vendor/qcom/*.dtb
+          DTB_FILE="out/arch/arm64/boot/dts/vendor/qcom/yupik.dtb"
+          if [ ! -f "$DTB_FILE" ]; then
+            echo "Błąd: Brak yupik.dtb"
+            exit 1
+          fi
+          cp "$DTB_FILE" out/arch/arm64/boot/dtb.img
+          echo "Utworzono dtb.img"
 
       - name: Create vendor_boot.img
         run: |
