@@ -56,7 +56,15 @@ jobs:
         run: |
           wget -q https://raw.githubusercontent.com/jbeich/platform_external_avb/refs/heads/master/avbtool.py
           chmod +x avbtool.py
-
+          
+      - name: Get vendor_boot.img from RisenID
+        run: |
+          wget -O stock_kernel.tar "https://github.com/RisenID/proprietary_vendor_samsung_a52sxq/releases/download/A528BXXUAGXK8_BTU/A528BXXUAGXK8_kernel.tar"
+          tar -xvf stock_kernel.tar
+          lz4 -d vendor_boot.img.lz4 vendor_boot.img
+          mkdir -p stock_images
+          cp vendor_boot.img stock_images/
+          
       - name: Setup toolchain
         if: steps.cache-toolchains.outputs.cache-hit != 'true'
         run: |
@@ -123,12 +131,11 @@ jobs:
 
       - name: Erase AVB footer from vendor_boot.img
         run: |
-          python3 avbtool.py erase_footer --image template-zip-file/images/vendor_boot.img 2>/dev/null || true
-
+         python3 avbtool.py erase_footer --image stock_images/vendor_boot.img 2>/dev/null || true
       
       - name: Patch vendor_boot.img
         run: |
-         cp template-zip-file/images/vendor_boot.img vendor_boot.img
+         cp stock_images/vendor_boot.img vendor_boot.img
          magiskboot unpack -h vendor_boot.img
          cp out/arch/arm64/boot/dts/vendor/qcom/yupik.dtb dtb
          mkdir ramdisk && cd ramdisk
@@ -152,7 +159,6 @@ jobs:
          sudo rm -rf ramdisk
          magiskboot repack vendor_boot.img
          mv new-boot.img vendor_boot.img
-         cp vendor_boot.img template-zip-file/images/vendor_boot.img
 
       - name: Copy dtbo.img
         run: |
@@ -195,3 +201,4 @@ jobs:
             echo "❌ Upload failed. Response: $RESPONSE"
             exit 1
           fi
+ 
