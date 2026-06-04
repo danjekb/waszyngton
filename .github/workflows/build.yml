@@ -128,6 +128,16 @@ jobs:
           fi
           mkdir -p tmp/lib/modules/$KERNEL_VER
           cp $MODULES_DIR/*.ko tmp/lib/modules/$KERNEL_VER/
+          if [ -f "out/modules.order" ]; then
+            cp out/modules.order tmp/lib/modules/$KERNEL_VER/
+          else
+            touch tmp/lib/modules/$KERNEL_VER/modules.order
+          fi
+          if [ -f "out/modules.builtin" ]; then
+            cp out/modules.builtin tmp/lib/modules/$KERNEL_VER/
+          else
+            touch tmp/lib/modules/$KERNEL_VER/modules.builtin
+          fi
           sudo depmod -b tmp -F out/System.map $KERNEL_VER 2>/dev/null || true
           cp tmp/lib/modules/$KERNEL_VER/modules.* $MODULES_DIR/ 2>/dev/null || true
           sed -i 's|/tmp/lib/modules/|/lib/modules/|g' $MODULES_DIR/modules.dep 2>/dev/null || true
@@ -161,9 +171,7 @@ jobs:
             --output boot.img
           cp boot.img template-zip-file/images/boot.img
 
-      - name: Patch vendor_boot.img (using magiskboot, timeout 2 min)
-        timeout-minutes: 2
-        continue-on-error: true
+      - name: Patch vendor_boot.img (using magiskboot)
         run: |
           cp template-zip-file/images/vendor_boot.img vendor_boot.img
           python3 avbtool.py erase_footer --image vendor_boot.img 2>/dev/null || true
@@ -179,6 +187,16 @@ jobs:
           mkdir -p lib/modules/5.4.289
           cp ../../out/modules_for_zip/*.ko lib/modules/5.4.289/ 2>/dev/null || true
           cp ../../out/modules_for_zip/modules.* lib/modules/5.4.289/ 2>/dev/null || true
+          
+          # Zawsze nadpisuj firmware TSP (jeśli źródła je mają)
+          if [ -d ../../firmware/tsp_stm ]; then
+            mkdir -p lib/firmware/tsp_stm
+            cp -f ../../firmware/tsp_stm/fts5cu56a_a52sxq* lib/firmware/tsp_stm/ 2>/dev/null || true
+            echo "Nadpisano firmware TSP (skopiowano ze źródeł)"
+          else
+            echo "Brak katalogu firmware/tsp_stm w źródłach – pomijam"
+          fi
+          
           chown -R root:root .
           find . -type d -exec chmod 755 {} \;
           find . -type f -exec chmod 644 {} \;
