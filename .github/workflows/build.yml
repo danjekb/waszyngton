@@ -1,4 +1,4 @@
-name: Build Kernel A52s 5G (KSU-Next)
+name: Build Blyat
 
 on:
   workflow_dispatch:
@@ -29,7 +29,7 @@ jobs:
           path: toolchains
           key: ${{ runner.os }}-clang-r530567-a52s
 
-      - name: Install deps
+      - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -38,7 +38,7 @@ jobs:
             android-sdk-libsparse-utils jq lz4
           ccache -M 10G
 
-      - name: Build mkbootimg (optional, for fallback)
+      - name: Build mkbootimg (native)
         run: |
           git clone https://github.com/osm0sis/mkbootimg.git /tmp/mkbootimg
           cd /tmp/mkbootimg
@@ -47,17 +47,27 @@ jobs:
           sudo cp mkbootimg /usr/local/bin/
           sudo chmod +x /usr/local/bin/mkbootimg
 
-      - name: Download magiskboot (Uevo001)
+      - name: Download mkbootimg.py
         run: |
-          sudo wget -O /usr/local/bin/magiskboot "https://github.com/Uevo001/magiskboot-linux/raw/main/x86_64/magiskboot"
-          sudo chmod +x /usr/local/bin/magiskboot
+          wget -O mkbootimg.py "https://raw.githubusercontent.com/danjekb/pliczki/refs/heads/main/mkbootimg.py"
+          chmod +x mkbootimg.py
 
-      - name: Download avbtool and erase footer
+      - name: Download avbtool
         run: |
           wget -q https://raw.githubusercontent.com/jbeich/platform_external_avb/refs/heads/master/avbtool.py
           chmod +x avbtool.py
-          python3 avbtool.py erase_footer --image template-zip-file/images/boot.img 2>/dev/null || true
-          python3 avbtool.py erase_footer --image template-zip-file/images/vendor_boot.img 2>/dev/null || true
+
+      - name: Get stock images from RisenID
+        run: |
+          wget -O stock_kernel.tar "https://github.com/RisenID/proprietary_vendor_samsung_a52sxq/releases/download/A528BXXUAGXK8_BTU/A528BXXUAGXK8_kernel.tar"
+          tar -xvf stock_kernel.tar
+          lz4 -d boot.img.lz4 boot.img
+          lz4 -d vendor_boot.img.lz4 vendor_boot.img
+          lz4 -d dtbo.img.lz4 dtbo.img
+          mkdir -p template-zip-file/images
+          cp boot.img template-zip-file/images/
+          cp vendor_boot.img template-zip-file/images/
+          cp dtbo.img template-zip-file/images/
 
       - name: Setup toolchain
         if: steps.cache-toolchains.outputs.cache-hit != 'true'
@@ -67,7 +77,7 @@ jobs:
             "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r530567.tar.gz"
           tar -xzf clang.tar.gz -C toolchains/clang
 
-      - name: Patch defconfig for KSU-Next
+      - name: Patch defconfig
         run: |
           DEFCONFIG=arch/arm64/configs/vendor/a52sxq_kor_single_defconfig
           sed -i 's/CONFIG_CFI_CLANG=y/# CONFIG_CFI_CLANG is not set/' $DEFCONFIG
@@ -116,66 +126,90 @@ jobs:
           fi
           mkdir -p tmp/lib/modules/$KERNEL_VER
           cp $MODULES_DIR/*.ko tmp/lib/modules/$KERNEL_VER/
-          if [ -f "out/modules.order" ]; then
-            cp out/modules.order tmp/lib/modules/$KERNEL_VER/
-          else
-            touch tmp/lib/modules/$KERNEL_VER/modules.order
-          fi
-          if [ -f "out/modules.builtin" ]; then
-            cp out/modules.builtin tmp/lib/modules/$KERNEL_VER/
-          else
-            touch tmp/lib/modules/$KERNEL_VER/modules.builtin
-          fi
+          [ -f "out/modules.order" ] && cp out/modules.order tmp/lib/modules/$KERNEL_VER/ || touch tmp/lib/modules/$KERNEL_VER/modules.order
+          [ -f "out/modules.builtin" ] && cp out/modules.builtin tmp/lib/modules/$KERNEL_VER/ || touch tmp/lib/modules/$KERNEL_VER/modules.builtin
           sudo depmod -b tmp -F out/System.map $KERNEL_VER 2>/dev/null || true
           cp tmp/lib/modules/$KERNEL_VER/modules.* $MODULES_DIR/ 2>/dev/null || true
           sed -i 's|/tmp/lib/modules/|/lib/modules/|g' $MODULES_DIR/modules.dep 2>/dev/null || true
           ls $MODULES_DIR/*.ko | xargs -n1 basename | sed 's/.ko$//' > $MODULES_DIR/modules.load 2>/dev/null || true
 
-      - name: Patch boot.img (using magiskboot, timeout 5 min)
-        timeout-minutes: 5
+      - name: Erase AVB footer from boot and vendor_boot
+        run: |
+          python3 avbtool.py erase_footer --image template-zip-file/images/boot.img 2>/dev/null || true
+          python3 avbtool.py erase_footer --image template-zip-file/images/vendor_boot.img 2>/dev/null || true
+
+      - name: Unpack boot.img
         run: |
           cp template-zip-file/images/boot.img boot.img
-          magiskboot unpack boot.img
-          cp out/arch/arm64/boot/Image kernel
-          magiskboot repack boot.img
-          mv new-boot.img boot.img
-          cp boot.img template-zip-file/images/boot.img
+          python3 mkbootimg.py unpack boot.img
+          if [ ! -d bootimg ]; then
+            echo "Failed to unpack boot.img"
+            exit 1
+          fi
 
-      - name: Patch vendor_boot.img (using magiskboot, timeout 5 min)
-        timeout-minutes: 5
+      - name: Unpack vendor_boot.img
         run: |
           cp template-zip-file/images/vendor_boot.img vendor_boot.img
-          python3 avbtool.py erase_footer --image vendor_boot.img 2>/dev/null || true
-          magiskboot unpack vendor_boot.img
-          cp out/arch/arm64/boot/dts/vendor/qcom/yupik.dtb dtb
-          if [ -d ramdisk ]; then
-            rm -rf ramdisk
+          python3 mkbootimg.py unpack vendor_boot.img
+          if [ ! -d vendor_bootimg ]; then
+            echo "Failed to unpack vendor_boot.img"
+            exit 1
           fi
-          mkdir ramdisk
-          cd ramdisk
-          cpio -idm < ../ramdisk.cpio
+          cp vendor_bootimg/dtb vendor_dtb
+
+      - name: Modify vendor ramdisk
+        run: |
+          mkdir vendor_ramdisk
+          cd vendor_ramdisk
+          cpio -idm < ../vendor_bootimg/ramdisk
           rm -rf lib/modules/*
           mkdir -p lib/modules/5.4.289
-          cp ../../out/modules_for_zip/*.ko lib/modules/5.4.289/ 2>/dev/null || true
-          cp ../../out/modules_for_zip/modules.* lib/modules/5.4.289/ 2>/dev/null || true
-          
-          if [ -d ../../firmware/tsp_stm ]; then
+          cp ../out/modules_for_zip/*.ko lib/modules/5.4.289/ 2>/dev/null || true
+          cp ../out/modules_for_zip/modules.* lib/modules/5.4.289/ 2>/dev/null || true
+          if [ -d ../firmware/tsp_stm ]; then
             mkdir -p lib/firmware/tsp_stm
-            cp -f ../../firmware/tsp_stm/fts5cu56a_a52sxq* lib/firmware/tsp_stm/ 2>/dev/null || true
-            echo "Nadpisano firmware TSP"
-          else
-            echo "Brak firmware TSP w źródłach"
+            cp -f ../firmware/tsp_stm/fts5cu56a_a52sxq* lib/firmware/tsp_stm/ 2>/dev/null || true
           fi
-          
           chown -R root:root .
           find . -type d -exec chmod 755 {} \;
           find . -type f -exec chmod 644 {} \;
-          find . -print0 | cpio --null -o -H newc --owner root:root > ../ramdisk.cpio.new
+          find . -print0 | cpio --null -o -H newc --owner root:root > ../new_vendor_ramdisk.cpio
           cd ..
-          mv ramdisk.cpio.new ramdisk.cpio
-          rm -rf ramdisk
-          magiskboot repack vendor_boot.img
-          mv new-boot.img vendor_boot.img
+          gzip -c new_vendor_ramdisk.cpio > new_vendor_ramdisk.gz
+
+      - name: Create new boot.img
+        run: |
+          python3 mkbootimg.py pack \
+            --kernel out/arch/arm64/boot/Image \
+            --ramdisk bootimg/ramdisk \
+            --base $(cat bootimg/base) \
+            --kernel_offset $(cat bootimg/kernel_offset) \
+            --ramdisk_offset $(cat bootimg/ramdisk_offset) \
+            --tags_offset $(cat bootimg/tags_offset) \
+            --pagesize $(cat bootimg/pagesize) \
+            --cmdline "$(cat bootimg/cmdline)" \
+            --os_version $(cat bootimg/os_version) \
+            --os_patch_level $(cat bootimg/os_patch_level) \
+            --header_version $(cat bootimg/header_version) \
+            --output boot.img
+          cp boot.img template-zip-file/images/boot.img
+
+      - name: Create new vendor_boot.img
+        run: |
+          python3 mkbootimg.py pack \
+            --kernel out/arch/arm64/boot/Image \
+            --ramdisk new_vendor_ramdisk.gz \
+            --dtb vendor_dtb \
+            --base $(cat vendor_bootimg/base) \
+            --kernel_offset $(cat vendor_bootimg/kernel_offset) \
+            --ramdisk_offset $(cat vendor_bootimg/ramdisk_offset) \
+            --tags_offset $(cat vendor_bootimg/tags_offset) \
+            --pagesize $(cat vendor_bootimg/pagesize) \
+            --cmdline "$(cat vendor_bootimg/cmdline)" \
+            --os_version $(cat vendor_bootimg/os_version) \
+            --os_patch_level $(cat vendor_bootimg/os_patch_level) \
+            --header_version $(cat vendor_bootimg/header_version) \
+            --output vendor_boot.img
           cp vendor_boot.img template-zip-file/images/vendor_boot.img
 
       - name: Copy dtbo.img
