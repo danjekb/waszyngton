@@ -253,29 +253,32 @@ jobs:
           python3 avbtool.py erase_footer --image template-zip-file/images/vendor_boot.img 2>/dev/null || true
 
       - name: Patch vendor_boot.img
-        run: |
-          cp template-zip-file/images/vendor_boot.img vendor_boot.img
-          magiskboot unpack -h vendor_boot.img
-          cp out/arch/arm64/boot/dts/vendor/qcom/yupik.dtb dtb
-          mkdir ramdisk && cd ramdisk
-          cpio -idm < ../ramdisk.cpio
-          sudo chown -R $(whoami):$(whoami) .
-          rm -rf lib/modules/5.4-gki/*
-          mkdir -p lib/modules/5.4.289
-          cp ../../out/modules_for_zip/*.ko lib/modules/5.4.289/
-          cp ../../out/modules_for_zip/modules.* lib/modules/5.4.289/
-          if [ -d ../../firmware/tsp_stm ]; then
-            mkdir -p lib/firmware/tsp_stm
-            cp -f ../../firmware/tsp_stm/fts5cu56a_a52sxq* lib/firmware/tsp_stm/ 2>/dev/null || true
-          fi
-          sudo chown -R root:root .
-          sudo find . -type d -exec chmod 755 {} \;
-          sudo find . -type f -exec chmod 644 {} \;
-          sudo find . -print0 | cpio --null -o -H newc --owner root:root > ../ramdisk.cpio
-          cd ..
-          sudo rm -rf ramdisk
-          magiskboot repack vendor_boot.img
-          mv new-boot.img vendor_boot.img
+  run: |
+    cp template-zip-file/images/vendor_boot.img vendor_boot.img
+    magiskboot unpack -h vendor_boot.img
+    cp out/arch/arm64/boot/dts/vendor/qcom/yupik.dtb dtb
+    mkdir ramdisk && cd ramdisk
+    cpio -idm < ../ramdisk.cpio
+    sudo chown -R $(whoami):$(whoami) .
+    rm -rf lib/modules/5.4-gki/*
+    mkdir -p lib/modules/5.4.289
+    cp ../../out/modules_for_zip/*.ko lib/modules/5.4.289/
+    cp ../../out/modules_for_zip/modules.* lib/modules/5.4.289/
+    if [ -d ../../firmware/tsp_stm ]; then
+      mkdir -p lib/firmware/tsp_stm
+      cp -f ../../firmware/tsp_stm/fts5cu56a_a52sxq* lib/firmware/tsp_stm/ 2>/dev/null || true
+    fi
+    sudo chown -R root:root .
+    sudo find . -type d -exec chmod 755 {} \;
+    sudo find . -type f -exec chmod 644 {} \;
+    sudo find . -print0 | cpio --null -o -H newc --owner root:root > ../ramdisk.cpio
+    cd ..
+    gzip -c ramdisk.cpio > ramdisk.cpio.gz
+    mv ramdisk.cpio.gz ramdisk.cpio
+    sudo rm -rf ramdisk
+    magiskboot repack vendor_boot.img
+    mv new-boot.img vendor_boot.img
+    cp vendor_boot.img template-zip-file/images/vendor_boot.img
 
       - name: Copy dtbo.img
         run: |
