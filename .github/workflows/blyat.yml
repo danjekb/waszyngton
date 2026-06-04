@@ -152,7 +152,7 @@ jobs:
          sudo rm -rf ramdisk
          magiskboot repack vendor_boot.img
          mv new-boot.img vendor_boot.img
-        cp vendor_boot.img template-zip-file/images/vendor_boot.img
+         cp vendor_boot.img template-zip-file/images/vendor_boot.img
 
       - name: Copy dtbo.img
         run: |
