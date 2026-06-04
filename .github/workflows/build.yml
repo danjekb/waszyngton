@@ -38,21 +38,21 @@ jobs:
             android-sdk-libsparse-utils jq lz4
           ccache -M 10G
 
-      - name: Build mkbootimg (and unpackbootimg)
+      - name: Build mkbootimg (optional, for fallback)
         run: |
           git clone https://github.com/osm0sis/mkbootimg.git /tmp/mkbootimg
           cd /tmp/mkbootimg
           find . -name Makefile -exec sed -i 's/-Werror//g' {} \;
           make
-          sudo cp mkbootimg unpackbootimg /usr/local/bin/
-          sudo chmod +x /usr/local/bin/mkbootimg /usr/local/bin/unpackbootimg
+          sudo cp mkbootimg /usr/local/bin/
+          sudo chmod +x /usr/local/bin/mkbootimg
 
       - name: Download magiskboot
         run: |
           sudo wget -O /usr/local/bin/magiskboot "https://github.com/danjekb/magiskbinary/releases/download/magiskboot-30.7/magiskboot-x86_64"
           sudo chmod +x /usr/local/bin/magiskboot
 
-      - name: Download avbtool and erase footer (optional)
+      - name: Download avbtool and erase footer
         run: |
           wget -q https://raw.githubusercontent.com/jbeich/platform_external_avb/refs/heads/master/avbtool.py
           chmod +x avbtool.py
@@ -131,42 +131,18 @@ jobs:
           sed -i 's|/tmp/lib/modules/|/lib/modules/|g' $MODULES_DIR/modules.dep 2>/dev/null || true
           ls $MODULES_DIR/*.ko | xargs -n1 basename | sed 's/.ko$//' > $MODULES_DIR/modules.load 2>/dev/null || true
 
-      - name: Extract ramdisk from boot.img (using unpackbootimg)
+      - name: Patch boot.img (using magiskboot, timeout 5 min)
+        timeout-minutes: 5
         run: |
           cp template-zip-file/images/boot.img boot.img
-          unpackbootimg -i boot.img -o ./
-          if [ ! -f boot.img-ramdisk.gz ]; then
-            echo "Nie udało się wyciągnąć ramdisk"
-            exit 1
-          fi
-          if file boot.img-ramdisk.gz | grep -q gzip; then
-            gunzip -c boot.img-ramdisk.gz > initrd.img
-          elif file boot.img-ramdisk.gz | grep -q lz4; then
-            lz4 -d boot.img-ramdisk.gz initrd.img
-          else
-            cp boot.img-ramdisk.gz initrd.img
-          fi
-          CMDLINE=$(cat boot.img-cmdline)
-          echo "CMDLINE=$CMDLINE" >> $GITHUB_ENV
-
-      - name: Create new boot.img with mkbootimg
-        run: |
-          mkbootimg \
-            --kernel out/arch/arm64/boot/Image \
-            --ramdisk initrd.img \
-            --base 0x00000000 \
-            --kernel_offset 0x00008000 \
-            --ramdisk_offset 0x02000000 \
-            --tags_offset 0x01e00000 \
-            --pagesize 4096 \
-            --cmdline "$CMDLINE" \
-            --os_version 14.0.0 \
-            --os_patch_level 2025-02 \
-            --header_version 3 \
-            --output boot.img
+          magiskboot unpack boot.img
+          cp out/arch/arm64/boot/Image kernel
+          magiskboot repack boot.img
+          mv new-boot.img boot.img
           cp boot.img template-zip-file/images/boot.img
 
-      - name: Patch vendor_boot.img (using magiskboot)
+      - name: Patch vendor_boot.img (using magiskboot, timeout 5 min)
+        timeout-minutes: 5
         run: |
           cp template-zip-file/images/vendor_boot.img vendor_boot.img
           python3 avbtool.py erase_footer --image vendor_boot.img 2>/dev/null || true
