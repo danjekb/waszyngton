@@ -30,10 +30,11 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y build-essential bc cpio curl wget git zip unzip zstd libssl-dev bison flex ccache
         ccache -M 5G
-        
+
     - name: Add KernelSU
       run: |
-       git clone --depth=1 https://github.com/tiann/KernelSU.git drivers/kernelsu
+        rm -rf drivers/kernelsu
+        git clone --depth=1 https://github.com/tiann/KernelSU.git drivers/kernelsu
 
     - name: Download Toolchains
       if: steps.cache-toolchains.outputs.cache-hit != 'true'
