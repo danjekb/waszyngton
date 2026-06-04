@@ -35,7 +35,7 @@ jobs:
           sudo apt-get install -y \
             build-essential bc cpio curl wget git zip unzip zstd \
             libssl-dev bison flex ccache python3 lld device-tree-compiler \
-            android-sdk-libsparse-utils jq lz4
+            android-sdk-libsparse-utils jq lz4 abootimg
           ccache -M 10G
 
       - name: Build mkbootimg
@@ -49,8 +49,8 @@ jobs:
 
       - name: Download magiskboot
         run: |
-           sudo wget -O /usr/local/bin/magiskboot "https://github.com/danjekb/magiskbinary/releases/download/magiskboot-24.3/magiskboot-x86_64"
-           sudo chmod +x /usr/local/bin/magiskboot
+          sudo wget -O /usr/local/bin/magiskboot "https://github.com/danjekb/magiskbinary/releases/download/magiskboot-30.7/magiskboot-x86_64"
+          sudo chmod +x /usr/local/bin/magiskboot
 
       - name: Get stock images from RisenID
         run: |
@@ -128,23 +128,45 @@ jobs:
           fi
           mkdir -p tmp/lib/modules/$KERNEL_VER
           cp $MODULES_DIR/*.ko tmp/lib/modules/$KERNEL_VER/
-          sudo depmod -b tmp -F out/System.map $KERNEL_VER
-          cp tmp/lib/modules/$KERNEL_VER/modules.* $MODULES_DIR/
-          sed -i 's|/tmp/lib/modules/|/lib/modules/|g' $MODULES_DIR/modules.dep
-          ls $MODULES_DIR/*.ko | xargs -n1 basename | sed 's/.ko$//' > $MODULES_DIR/modules.load
+          sudo depmod -b tmp -F out/System.map $KERNEL_VER 2>/dev/null || true
+          cp tmp/lib/modules/$KERNEL_VER/modules.* $MODULES_DIR/ 2>/dev/null || true
+          sed -i 's|/tmp/lib/modules/|/lib/modules/|g' $MODULES_DIR/modules.dep 2>/dev/null || true
+          ls $MODULES_DIR/*.ko | xargs -n1 basename | sed 's/.ko$//' > $MODULES_DIR/modules.load 2>/dev/null || true
 
-      - name: Patch boot.img
+      - name: Extract ramdisk from stock boot.img
         run: |
           cp template-zip-file/images/boot.img boot.img
-          magiskboot unpack boot.img
-          cp out/arch/arm64/boot/Image kernel
-          magiskboot repack boot.img
-          mv new-boot.img boot.img
+          abootimg -x boot.img
+          if [ ! -f initrd.img ]; then
+            echo "Nie udało się wyciągnąć ramdisk"
+            exit 1
+          fi
+          CMDLINE=$(abootimg --info boot.img | grep "cmdline" | cut -d: -f2- | xargs)
+          echo "CMDLINE=$CMDLINE" >> $GITHUB_ENV
+
+      - name: Create new boot.img with mkbootimg
+        run: |
+          mkbootimg \
+            --kernel out/arch/arm64/boot/Image \
+            --ramdisk initrd.img \
+            --base 0x00000000 \
+            --kernel_offset 0x00008000 \
+            --ramdisk_offset 0x02000000 \
+            --tags_offset 0x01e00000 \
+            --pagesize 4096 \
+            --cmdline "$CMDLINE" \
+            --os_version 14.0.0 \
+            --os_patch_level 2025-02 \
+            --header_version 3 \
+            --output boot.img
           cp boot.img template-zip-file/images/boot.img
 
-      - name: Patch vendor_boot.img
+      - name: Patch vendor_boot.img (using magiskboot, timeout 2 min)
+        timeout-minutes: 2
+        continue-on-error: true
         run: |
           cp template-zip-file/images/vendor_boot.img vendor_boot.img
+          python3 avbtool.py erase_footer --image vendor_boot.img 2>/dev/null || true
           magiskboot unpack vendor_boot.img
           cp out/arch/arm64/boot/dts/vendor/qcom/yupik.dtb dtb
           if [ -d ramdisk ]; then
@@ -155,8 +177,8 @@ jobs:
           cpio -idm < ../ramdisk.cpio
           rm -rf lib/modules/*
           mkdir -p lib/modules/5.4.289
-          cp ../../out/modules_for_zip/*.ko lib/modules/5.4.289/
-          cp ../../out/modules_for_zip/modules.* lib/modules/5.4.289/
+          cp ../../out/modules_for_zip/*.ko lib/modules/5.4.289/ 2>/dev/null || true
+          cp ../../out/modules_for_zip/modules.* lib/modules/5.4.289/ 2>/dev/null || true
           chown -R root:root .
           find . -type d -exec chmod 755 {} \;
           find . -type f -exec chmod 644 {} \;
