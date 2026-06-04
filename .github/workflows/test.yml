@@ -35,10 +35,10 @@ jobs:
           sudo apt-get install -y \
             build-essential bc cpio curl wget git zip unzip zstd \
             libssl-dev bison flex ccache python3 lld device-tree-compiler \
-            android-sdk-libsparse-utils jq lz4
+            android-sdk-libsparse-utils jq lz4 android-bootimg-tools
           ccache -M 10G
 
-      - name: Build mkbootimg (native, for host)
+      - name: Build mkbootimg (native, for packing)
         run: |
           git clone https://github.com/osm0sis/mkbootimg.git /tmp/mkbootimg
           cd /tmp/mkbootimg
@@ -47,10 +47,27 @@ jobs:
           sudo cp mkbootimg /usr/local/bin/
           sudo chmod +x /usr/local/bin/mkbootimg
 
-      - name: Download mkbootimg.py from your repo
+      - name: Download mkbootimg.py (no gki dependency)
         run: |
-          wget -O mkbootimg.py "https://raw.githubusercontent.com/danjekb/pliczki/refs/heads/main/mkbootimg.py"
+          wget -O mkbootimg.py "https://raw.githubusercontent.com/LineageOS/android_system_tools_mkbootimg/master/mkbootimg.py"
           chmod +x mkbootimg.py
+
+      - name: Download avbtool
+        run: |
+          wget -q https://raw.githubusercontent.com/jbeich/platform_external_avb/refs/heads/master/avbtool.py
+          chmod +x avbtool.py
+
+      - name: Get stock images from RisenID
+        run: |
+          wget -O stock_kernel.tar "https://github.com/RisenID/proprietary_vendor_samsung_a52sxq/releases/download/A528BXXUAGXK8_BTU/A528BXXUAGXK8_kernel.tar"
+          tar -xvf stock_kernel.tar
+          lz4 -d boot.img.lz4 boot.img
+          lz4 -d vendor_boot.img.lz4 vendor_boot.img
+          lz4 -d dtbo.img.lz4 dtbo.img
+          mkdir -p template-zip-file/images
+          cp boot.img template-zip-file/images/
+          cp vendor_boot.img template-zip-file/images/
+          cp dtbo.img template-zip-file/images/
 
       - name: Setup toolchain
         if: steps.cache-toolchains.outputs.cache-hit != 'true'
@@ -116,16 +133,26 @@ jobs:
           sed -i 's|/tmp/lib/modules/|/lib/modules/|g' $MODULES_DIR/modules.dep 2>/dev/null || true
           ls $MODULES_DIR/*.ko | xargs -n1 basename | sed 's/.ko$//' > $MODULES_DIR/modules.load 2>/dev/null || true
 
-      - name: Unpack boot.img from template-zip-file
+      - name: Erase AVB footer
+        run: |
+          python3 avbtool.py erase_footer --image template-zip-file/images/boot.img 2>/dev/null || true
+          python3 avbtool.py erase_footer --image template-zip-file/images/vendor_boot.img 2>/dev/null || true
+
+      - name: Unpack boot.img using unpackbootimg
         run: |
           cp template-zip-file/images/boot.img boot.img
-          python3 mkbootimg.py unpack boot.img
-          if [ ! -d bootimg ]; then
+          unpackbootimg -i boot.img -o .
+          if [ ! -f boot.img-ramdisk.gz ]; then
             echo "Failed to unpack boot.img"
             exit 1
           fi
+          gunzip -c boot.img-ramdisk.gz > boot_ramdisk.cpio
+          mkdir boot_ramdisk
+          cd boot_ramdisk
+          cpio -idm < ../boot_ramdisk.cpio
+          cd ..
 
-      - name: Unpack vendor_boot.img from template-zip-file
+      - name: Unpack vendor_boot.img using mkbootimg.py (for dtb and ramdisk)
         run: |
           cp template-zip-file/images/vendor_boot.img vendor_boot.img
           python3 mkbootimg.py unpack vendor_boot.img
@@ -134,12 +161,20 @@ jobs:
             exit 1
           fi
           cp vendor_bootimg/dtb vendor_dtb
+          # Convert vendor ramdisk (may be lz4 or gzip)
+          if file vendor_bootimg/ramdisk | grep -q lz4; then
+            lz4 -d vendor_bootimg/ramdisk vendor_ramdisk.cpio
+          else
+            cp vendor_bootimg/ramdisk vendor_ramdisk.cpio
+          fi
+          mkdir vendor_ramdisk
+          cd vendor_ramdisk
+          cpio -idm < ../vendor_ramdisk.cpio
+          cd ..
 
       - name: Modify vendor ramdisk
         run: |
-          mkdir vendor_ramdisk
           cd vendor_ramdisk
-          cpio -idm < ../vendor_bootimg/ramdisk
           rm -rf lib/modules/*
           mkdir -p lib/modules/5.4.289
           cp ../out/modules_for_zip/*.ko lib/modules/5.4.289/ 2>/dev/null || true
@@ -155,38 +190,59 @@ jobs:
           cd ..
           gzip -c new_vendor_ramdisk.cpio > new_vendor_ramdisk.gz
 
-      - name: Create new boot.img
+      - name: Create new boot.img using mkbootimg
         run: |
-          python3 mkbootimg.py pack \
+          # Get boot parameters from unpackbootimg output
+          BASE=$(cat boot.img-base)
+          PAGESIZE=$(cat boot.img-pagesize)
+          KERNEL_OFFSET=$(cat boot.img-kernel_offset)
+          RAMDISK_OFFSET=$(cat boot.img-ramdisk_offset)
+          TAGS_OFFSET=$(cat boot.img-tags_offset)
+          CMDLINE=$(cat boot.img-cmdline)
+          OS_VERSION=$(cat boot.img-os_version)
+          OS_PATCH_LEVEL=$(cat boot.img-os_patch_level)
+          HEADER_VERSION=$(cat boot.img-header_version)
+
+          mkbootimg \
             --kernel out/arch/arm64/boot/Image \
-            --ramdisk bootimg/ramdisk \
-            --base $(cat bootimg/base) \
-            --kernel_offset $(cat bootimg/kernel_offset) \
-            --ramdisk_offset $(cat bootimg/ramdisk_offset) \
-            --tags_offset $(cat bootimg/tags_offset) \
-            --pagesize $(cat bootimg/pagesize) \
-            --cmdline "$(cat bootimg/cmdline)" \
-            --os_version $(cat bootimg/os_version) \
-            --os_patch_level $(cat bootimg/os_patch_level) \
-            --header_version $(cat bootimg/header_version) \
+            --ramdisk boot_ramdisk.cpio \
+            --base $BASE \
+            --kernel_offset $KERNEL_OFFSET \
+            --ramdisk_offset $RAMDISK_OFFSET \
+            --tags_offset $TAGS_OFFSET \
+            --pagesize $PAGESIZE \
+            --cmdline "$CMDLINE" \
+            --os_version $OS_VERSION \
+            --os_patch_level $OS_PATCH_LEVEL \
+            --header_version $HEADER_VERSION \
             --output boot.img
           cp boot.img template-zip-file/images/boot.img
 
-      - name: Create new vendor_boot.img
+      - name: Create new vendor_boot.img using mkbootimg (native)
         run: |
-          python3 mkbootimg.py pack \
+          BASE=$(cat vendor_bootimg/base)
+          PAGESIZE=$(cat vendor_bootimg/pagesize)
+          KERNEL_OFFSET=$(cat vendor_bootimg/kernel_offset)
+          RAMDISK_OFFSET=$(cat vendor_bootimg/ramdisk_offset)
+          TAGS_OFFSET=$(cat vendor_bootimg/tags_offset)
+          CMDLINE=$(cat vendor_bootimg/cmdline)
+          OS_VERSION=$(cat vendor_bootimg/os_version)
+          OS_PATCH_LEVEL=$(cat vendor_bootimg/os_patch_level)
+          HEADER_VERSION=$(cat vendor_bootimg/header_version)
+
+          mkbootimg \
             --kernel out/arch/arm64/boot/Image \
             --ramdisk new_vendor_ramdisk.gz \
             --dtb vendor_dtb \
-            --base $(cat vendor_bootimg/base) \
-            --kernel_offset $(cat vendor_bootimg/kernel_offset) \
-            --ramdisk_offset $(cat vendor_bootimg/ramdisk_offset) \
-            --tags_offset $(cat vendor_bootimg/tags_offset) \
-            --pagesize $(cat vendor_bootimg/pagesize) \
-            --cmdline "$(cat vendor_bootimg/cmdline)" \
-            --os_version $(cat vendor_bootimg/os_version) \
-            --os_patch_level $(cat vendor_bootimg/os_patch_level) \
-            --header_version $(cat vendor_bootimg/header_version) \
+            --base $BASE \
+            --kernel_offset $KERNEL_OFFSET \
+            --ramdisk_offset $RAMDISK_OFFSET \
+            --tags_offset $TAGS_OFFSET \
+            --pagesize $PAGESIZE \
+            --cmdline "$CMDLINE" \
+            --os_version $OS_VERSION \
+            --os_patch_level $OS_PATCH_LEVEL \
+            --header_version $HEADER_VERSION \
             --output vendor_boot.img
           cp vendor_boot.img template-zip-file/images/vendor_boot.img
 
