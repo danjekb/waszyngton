@@ -35,17 +35,17 @@ jobs:
           sudo apt-get install -y \
             build-essential bc cpio curl wget git zip unzip zstd \
             libssl-dev bison flex ccache python3 lld device-tree-compiler \
-            android-sdk-libsparse-utils jq lz4 android-bootimg-tools
+            android-sdk-libsparse-utils jq lz4
           ccache -M 10G
 
-      - name: Build mkbootimg (native, for packing)
+      - name: Build mkbootimg and unpackbootimg
         run: |
           git clone https://github.com/osm0sis/mkbootimg.git /tmp/mkbootimg
           cd /tmp/mkbootimg
           find . -name Makefile -exec sed -i 's/-Werror//g' {} \;
           make
-          sudo cp mkbootimg /usr/local/bin/
-          sudo chmod +x /usr/local/bin/mkbootimg
+          sudo cp mkbootimg unpackbootimg /usr/local/bin/
+          sudo chmod +x /usr/local/bin/mkbootimg /usr/local/bin/unpackbootimg
 
       - name: Download mkbootimg.py (no gki dependency)
         run: |
@@ -152,7 +152,7 @@ jobs:
           cpio -idm < ../boot_ramdisk.cpio
           cd ..
 
-      - name: Unpack vendor_boot.img using mkbootimg.py (for dtb and ramdisk)
+      - name: Unpack vendor_boot.img using mkbootimg.py
         run: |
           cp template-zip-file/images/vendor_boot.img vendor_boot.img
           python3 mkbootimg.py unpack vendor_boot.img
@@ -161,7 +161,6 @@ jobs:
             exit 1
           fi
           cp vendor_bootimg/dtb vendor_dtb
-          # Convert vendor ramdisk (may be lz4 or gzip)
           if file vendor_bootimg/ramdisk | grep -q lz4; then
             lz4 -d vendor_bootimg/ramdisk vendor_ramdisk.cpio
           else
@@ -192,7 +191,6 @@ jobs:
 
       - name: Create new boot.img using mkbootimg
         run: |
-          # Get boot parameters from unpackbootimg output
           BASE=$(cat boot.img-base)
           PAGESIZE=$(cat boot.img-pagesize)
           KERNEL_OFFSET=$(cat boot.img-kernel_offset)
@@ -218,7 +216,7 @@ jobs:
             --output boot.img
           cp boot.img template-zip-file/images/boot.img
 
-      - name: Create new vendor_boot.img using mkbootimg (native)
+      - name: Create new vendor_boot.img using mkbootimg
         run: |
           BASE=$(cat vendor_bootimg/base)
           PAGESIZE=$(cat vendor_bootimg/pagesize)
