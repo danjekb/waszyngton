@@ -38,7 +38,7 @@ jobs:
             android-sdk-libsparse-utils jq lz4
           ccache -M 10G
 
-      - name: Build mkbootimg (native)
+      - name: Build mkbootimg (native, for packing)
         run: |
           git clone https://github.com/osm0sis/mkbootimg.git /tmp/mkbootimg
           cd /tmp/mkbootimg
@@ -47,27 +47,15 @@ jobs:
           sudo cp mkbootimg /usr/local/bin/
           sudo chmod +x /usr/local/bin/mkbootimg
 
-      - name: Download mkbootimg.py
+      - name: Download mkbootimg.py (LineageOS, no gki dependency)
         run: |
-          wget -O mkbootimg.py "https://raw.githubusercontent.com/danjekb/pliczki/refs/heads/main/mkbootimg.py"
+          wget -O mkbootimg.py "https://raw.githubusercontent.com/LineageOS/android_system_tools_mkbootimg/master/mkbootimg.py"
           chmod +x mkbootimg.py
 
       - name: Download avbtool
         run: |
           wget -q https://raw.githubusercontent.com/jbeich/platform_external_avb/refs/heads/master/avbtool.py
           chmod +x avbtool.py
-
-      - name: Get stock images from RisenID
-        run: |
-          wget -O stock_kernel.tar "https://github.com/RisenID/proprietary_vendor_samsung_a52sxq/releases/download/A528BXXUAGXK8_BTU/A528BXXUAGXK8_kernel.tar"
-          tar -xvf stock_kernel.tar
-          lz4 -d boot.img.lz4 boot.img
-          lz4 -d vendor_boot.img.lz4 vendor_boot.img
-          lz4 -d dtbo.img.lz4 dtbo.img
-          mkdir -p template-zip-file/images
-          cp boot.img template-zip-file/images/
-          cp vendor_boot.img template-zip-file/images/
-          cp dtbo.img template-zip-file/images/
 
       - name: Setup toolchain
         if: steps.cache-toolchains.outputs.cache-hit != 'true'
@@ -133,12 +121,12 @@ jobs:
           sed -i 's|/tmp/lib/modules/|/lib/modules/|g' $MODULES_DIR/modules.dep 2>/dev/null || true
           ls $MODULES_DIR/*.ko | xargs -n1 basename | sed 's/.ko$//' > $MODULES_DIR/modules.load 2>/dev/null || true
 
-      - name: Erase AVB footer from boot and vendor_boot
+      - name: Erase AVB footer
         run: |
           python3 avbtool.py erase_footer --image template-zip-file/images/boot.img 2>/dev/null || true
           python3 avbtool.py erase_footer --image template-zip-file/images/vendor_boot.img 2>/dev/null || true
 
-      - name: Unpack boot.img
+      - name: Unpack boot.img using mkbootimg.py
         run: |
           cp template-zip-file/images/boot.img boot.img
           python3 mkbootimg.py unpack boot.img
@@ -147,7 +135,7 @@ jobs:
             exit 1
           fi
 
-      - name: Unpack vendor_boot.img
+      - name: Unpack vendor_boot.img using mkbootimg.py
         run: |
           cp template-zip-file/images/vendor_boot.img vendor_boot.img
           python3 mkbootimg.py unpack vendor_boot.img
@@ -177,7 +165,7 @@ jobs:
           cd ..
           gzip -c new_vendor_ramdisk.cpio > new_vendor_ramdisk.gz
 
-      - name: Create new boot.img
+      - name: Create new boot.img using native mkbootimg
         run: |
           python3 mkbootimg.py pack \
             --kernel out/arch/arm64/boot/Image \
@@ -194,7 +182,7 @@ jobs:
             --output boot.img
           cp boot.img template-zip-file/images/boot.img
 
-      - name: Create new vendor_boot.img
+      - name: Create new vendor_boot.img using native mkbootimg
         run: |
           python3 mkbootimg.py pack \
             --kernel out/arch/arm64/boot/Image \
